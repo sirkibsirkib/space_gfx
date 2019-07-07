@@ -1,0 +1,9 @@
+[package]
+name = "gfx_space"
+version = "0.1.0"
+authors = ["sirkibsirkib <christopher.esterhuyse@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+ggez = "0.4.4"
+rand = "0.7.0"
