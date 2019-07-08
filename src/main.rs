@@ -1,6 +1,6 @@
 extern crate ggez;
 use ggez::graphics::Vector2;
-
+use std::path;
 use core::f32::consts::E;
 use ggez::event::Keycode;
 use ggez::event::Mod;
@@ -308,6 +308,16 @@ impl event::EventHandler for MainState {
             Keycode::F4 => {
                 let q = ggez::graphics::is_fullscreen(ctx);
                 ggez::graphics::set_fullscreen(ctx, !q).unwrap()
+            },
+            Keycode::PrintScreen => match graphics::screenshot(ctx) {
+                Ok(img) => for i in 0.. {
+                    let f = format!("space_screencap_{}.png", i);
+                    let path = path::Path::new(&f);
+                    if !path.exists() {
+                        img.encode(ctx, graphics::ImageFormat::Png, path).expect("K")
+                    }
+                },
+                Err(_) => println!("print screen failed!"),
             },
             Keycode::Num1 => self.scrolling_index = 0,
             Keycode::Num2 => self.scrolling_index = 1,
