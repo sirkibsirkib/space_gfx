@@ -1,4 +1,5 @@
 # Space Gfx
+![alt text](https://github.com/sirkibsirkib/space_gfx/tree/master/resources/screencap.png)
 
 ## What is this?
 It's a game where you pilot a ship through _spaaaaace_. There isn't much to do
