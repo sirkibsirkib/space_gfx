@@ -2,6 +2,7 @@
 <p align="center">
   <img width="460" height="300" src="https://github.com/sirkibsirkib/space_gfx/blob/master/resources/screencap.png?raw=true">
 </p>
+
 ## What is this?
 It's a game where you pilot a ship through _spaaaaace_. There isn't much to do
 just yet. There are planets around that just kinda sit there.
