@@ -44,8 +44,10 @@ struct Me {
 
 
 const ACCEL: f32 = 0.0004;
-const TRAJ_PTS_CAP: usize = 3000;
+const TRAJ_PTS_CAP: usize = 5000;
 const TRAJ_SCALING: usize = 30;
+
+
 struct MainState {
     me: Me,
     planets: Vec<Instancedata>,
@@ -54,9 +56,11 @@ struct MainState {
     sig_config: SigConfig,
     x_pressed: Option<bool>,
     y_pressed: Option<bool>,
+    press_accel: Point2,
     scrolling_index: usize,
     scrolling_text: Vec<Option<ggez::graphics::Text>>,
     trajectory: [Point2; TRAJ_PTS_CAP],
+    trajjer: Trajjer,
 }
 
 const NUM_VARS: usize = 6;
@@ -79,6 +83,9 @@ impl Default for SigConfig {
     }
 }
 impl SigConfig {
+    fn traj_len(&self) -> usize {
+        (self.x[5] as usize).min(TRAJ_PTS_CAP-100).max(8)
+    }
     fn sig(&self, dist: f32) -> f32 {
         let q = 2. / (1.0 + E.powf(-self.x[1])) - 1.;
         let divisor = 1.0 + E.powf(-self.x[1] - dist * self.x[0]);
@@ -100,6 +107,13 @@ fn length(p: Point2) -> f32 {
 }
 
 impl MainState {
+    fn recompute_press_accel(&mut self) {
+        self.trajjer.clear_traj();
+        self.press_accel = Point2::new(self.x_pressed.val(), self.y_pressed.val());
+        if self.x_pressed.is_some() && self.y_pressed.is_some() {
+            self.press_accel /= 1.4;
+        }
+    }
     /// given a point in space, returns a vector representing its acceleration
     fn grav_accel<'a>(planets: impl Iterator<Item=&'a Instancedata>, pt: Point2) -> Vector2 {
         let mut v = Vector2::new(0., 0.);
@@ -147,6 +161,7 @@ impl MainState {
             velocity: Point2::new(0., 0.),
         };
         let s = MainState {
+            trajjer: Trajjer::new(),
             trajectory: [Point2::new(0., 0.); TRAJ_PTS_CAP],
             me,
             planets,
@@ -155,6 +170,7 @@ impl MainState {
             sig_config: Default::default(),
             x_pressed: None,
             y_pressed: None,
+            press_accel: Point2::new(0., 0.),
             scrolling_index: 0,
             scrolling_text: (0..NUM_VARS).map(|_| None).collect(),
         };
@@ -192,34 +208,107 @@ impl Joystick for Option<bool> {
     }
 }
 
-impl MainState {
-    
+struct Trajjer {
+    buf: Vec<Point2>,
+    head: usize,
+    last_vel: Point2,
+
+    buf_projected: Vec<Point2>,
+    cycler: usize,
+}
+impl Trajjer {
+    fn new() -> Self {
+        Self {
+            buf: vec![Point2::new(0., 0.); TRAJ_PTS_CAP],
+            buf_projected: vec![Point2::new(0., 0.); TRAJ_PTS_CAP],
+            last_vel: Point2::new(0., 0.),
+            cycler: TRAJ_SCALING-1,
+            head: TRAJ_PTS_CAP,
+        }
+    }
+    fn project_slice(&mut self, sig_config: &SigConfig, window_dims: Point2, me_pos: Point2){
+        let l = sig_config.traj_len();
+        let range = self.head..(self.head + l);
+        let src = &self.buf[range.clone()];
+        let dest = &mut self.buf_projected[range];
+        for (s, d) in src.iter().zip(dest.iter_mut()) {
+            *d = sig_config.project(*s, me_pos, window_dims).0;
+        }
+    }
+    fn get_projected_slice(&self, sig_config: &SigConfig) -> &[Point2] {
+        let l = sig_config.traj_len();
+        let range = self.head..(self.head + l);
+        &self.buf_projected[range]
+    }
+    fn clear_traj(&mut self) {
+         // trigger recompute
+        self.head = TRAJ_PTS_CAP;
+        self.cycler = TRAJ_SCALING-1;
+    }
+    fn tick(&mut self, sig_config: &SigConfig, planets: &Vec<Instancedata>, press_accel: Point2, me: &Me) {
+        println!("TICK");
+        self.cycler += 1;
+        if self.cycler == TRAJ_SCALING {
+            self.cycler = 0;
+            self.head += 1;
+        }
+        let min_len = sig_config.traj_len();
+        let valuable_range = self.head..self.buf.len();
+        if valuable_range.len() < min_len {
+            let mut prev_;
+            let mut vel_;
+
+            let left = self.head.checked_sub(min_len*2).unwrap_or(0);
+            let compute_from: usize = if valuable_range.len() > 0 {
+                self.buf.copy_within(valuable_range.clone(), left);
+                prev_ = *self.buf.as_slice().last().unwrap();
+                vel_ = self.last_vel;
+                valuable_range.len() + left
+            } else {
+                self.buf[left] = me.data.pos;
+                prev_ = self.buf[left];
+                vel_ = me.velocity;
+                left+1
+            };
+            for p in &mut self.buf[compute_from..] {
+                for _ in 0..TRAJ_SCALING {
+                    // 1. reuse keypress acceleration
+                    // 2. update velocity (keypress + gravity)
+                    vel_ += press_accel.coords + MainState::grav_accel(planets.iter(), prev_);
+
+                    // 3. update position
+                    prev_ += vel_.coords;
+                }
+                *p = prev_;
+            }
+            self.head = left;
+            self.last_vel = vel_;
+        }
+    }
 }
 
 impl event::EventHandler for MainState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
         // 1. compute keypress acceleration
-        let mut acc = Point2::new(self.x_pressed.val(), self.y_pressed.val());
-        if self.x_pressed.is_some() && self.y_pressed.is_some() {
-            acc /= 1.4;
-        }
-
         // 2. update velocity (keypress + gravity)
-        self.me.velocity += acc.coords + Self::grav_accel(self.planets.iter(), self.me.data.pos);
+        self.me.velocity += self.press_accel.coords + Self::grav_accel(self.planets.iter(), self.me.data.pos);
 
         // 3. update position
         self.me.data.pos += self.me.velocity.coords;
+
+        self.trajjer.tick(&self.sig_config, &self.planets, self.press_accel, &self.me);
+        self.trajjer.project_slice(&self.sig_config, self.window_dims, self.me.data.pos);
 
         {
             let mut prev_ = self.me.data.pos;
             let mut vel_ = self.me.velocity;
             self.trajectory[0] = self.window_dims * 0.5;
-            let tu = (self.sig_config.x[5] as usize).min(TRAJ_PTS_CAP).max(8);
+            let tu = self.sig_config.traj_len();
             for p in self.trajectory.iter_mut().skip(1).take(tu) {
                 for _ in 0..TRAJ_SCALING {
                     // 1. reuse keypress acceleration
                     // 2. update velocity (keypress + gravity)
-                    vel_ += acc.coords + Self::grav_accel(self.planets.iter(), prev_);
+                    vel_ += self.press_accel.coords + Self::grav_accel(self.planets.iter(), prev_);
 
                     // 3. update position
                     prev_ += vel_.coords;
@@ -272,39 +361,47 @@ impl event::EventHandler for MainState {
             ggez::graphics::draw_ex(ctx, f, dp)?;
         }
 
-        let tu = (self.sig_config.x[5] as usize).min(TRAJ_PTS_CAP).max(8);
+        let tu = self.sig_config.traj_len();
+        // let ts = &self.trajectory[..];
+        let ts = self.trajjer.get_projected_slice(&self.sig_config);
         ggez::graphics::set_color(ctx, PINK)?;
-        graphics::line(ctx, &self.trajectory[0..=tu/4], 1.0)?;
+        graphics::line(ctx, &ts[0..=tu/4], 1.0)?;
         ggez::graphics::set_color(ctx, PINK2)?;
-        graphics::line(ctx, &self.trajectory[tu*1/4..=tu*2/4], 1.0)?;
+        graphics::line(ctx, &ts[tu*1/4..=tu*2/4], 1.0)?;
         ggez::graphics::set_color(ctx, PINK3)?;
-        graphics::line(ctx, &self.trajectory[tu*2/4..=tu*3/4], 1.0)?;
+        graphics::line(ctx, &ts[tu*2/4..=tu*3/4], 1.0)?;
         ggez::graphics::set_color(ctx, PINK4)?;
-        graphics::line(ctx, &self.trajectory[tu*3/4..tu], 1.0)?;
+        graphics::line(ctx, &ts[tu*3/4..tu], 1.0)?;
 
         graphics::present(ctx);
         Ok(())
     }
 
-    fn key_up_event(&mut self, _ctx: &mut Context, keycode: Keycode, _keymod: Mod, _repeat: bool) {
+    fn key_up_event(&mut self, _ctx: &mut Context, keycode: Keycode, _keymod: Mod, repeat: bool) {
+        if repeat {
+            return;
+        }
         match keycode {
-            Keycode::D => self.x_pressed.bump_left(),
-            Keycode::A => self.x_pressed.bump_right(),
-            Keycode::S => self.y_pressed.bump_left(),
-            Keycode::W => self.y_pressed.bump_right(),
+            Keycode::D => {self.x_pressed.bump_left(); self.recompute_press_accel()},
+            Keycode::A => {self.x_pressed.bump_right(); self.recompute_press_accel()},
+            Keycode::S => {self.y_pressed.bump_left(); self.recompute_press_accel()},
+            Keycode::W => {self.y_pressed.bump_right(); self.recompute_press_accel()},
             _ => (),
         }
     }
 
-    fn key_down_event(&mut self, ctx: &mut Context, keycode: Keycode, _keymod: Mod, _repeat: bool) {
+    fn key_down_event(&mut self, ctx: &mut Context, keycode: Keycode, _keymod: Mod, repeat: bool) {
+        if repeat {
+            return;
+        }
         match keycode {
             Keycode::Escape => ctx.quit().unwrap(),
             Keycode::Space => self.me.velocity = Point2::new(0., 0.),
             Keycode::Backspace => self.me.data.pos = Point2::new(0., 0.),
-            Keycode::A => self.x_pressed.bump_left(),
-            Keycode::D => self.x_pressed.bump_right(),
-            Keycode::W => self.y_pressed.bump_left(),
-            Keycode::S => self.y_pressed.bump_right(),
+            Keycode::A => {self.x_pressed.bump_left(); self.recompute_press_accel()},
+            Keycode::D => {self.x_pressed.bump_right(); self.recompute_press_accel()},
+            Keycode::W => {self.y_pressed.bump_left(); self.recompute_press_accel()},
+            Keycode::S => {self.y_pressed.bump_right(); self.recompute_press_accel()},
             Keycode::F4 => {
                 let q = ggez::graphics::is_fullscreen(ctx);
                 ggez::graphics::set_fullscreen(ctx, !q).unwrap()
