@@ -44,8 +44,8 @@ struct Me {
 
 
 const ACCEL: f32 = 0.0004;
-const TRAJ_PTS_CAP: usize = 5000;
-const TRAJ_SCALING: usize = 30;
+const TRAJ_PTS_CAP: usize = 8_000;
+const TRAJ_SCALING: usize = 20;
 
 
 struct MainState {
@@ -59,7 +59,7 @@ struct MainState {
     press_accel: Point2,
     scrolling_index: usize,
     scrolling_text: Vec<Option<ggez::graphics::Text>>,
-    trajectory: [Point2; TRAJ_PTS_CAP],
+    // trajectory: [Point2; TRAJ_PTS_CAP],
     trajjer: Trajjer,
 }
 
@@ -162,7 +162,6 @@ impl MainState {
         };
         let s = MainState {
             trajjer: Trajjer::new(),
-            trajectory: [Point2::new(0., 0.); TRAJ_PTS_CAP],
             me,
             planets,
             planet_sprite,
@@ -231,9 +230,18 @@ impl Trajjer {
         let range = self.head..(self.head + l);
         let src = &self.buf[range.clone()];
         let dest = &mut self.buf_projected[range];
-        for (s, d) in src.iter().zip(dest.iter_mut()) {
-            *d = sig_config.project(*s, me_pos, window_dims).0;
+        let a = std::time::Instant::now();
+        if sig_config.traj_len() > 900 {
+            use rayon::prelude::*;
+            src.par_iter().zip(dest.par_iter_mut()).for_each(|(s,d)| {
+                *d = sig_config.project(*s, me_pos, window_dims).0;
+            });
+        } else {
+            src.iter().zip(dest.iter_mut()).for_each(|(s,d)| {
+                *d = sig_config.project(*s, me_pos, window_dims).0;
+            });
         }
+        println!("{:?}", a.elapsed());
     }
     fn get_projected_slice(&self, sig_config: &SigConfig) -> &[Point2] {
         let l = sig_config.traj_len();
@@ -246,7 +254,7 @@ impl Trajjer {
         self.cycler = TRAJ_SCALING-1;
     }
     fn tick(&mut self, sig_config: &SigConfig, planets: &Vec<Instancedata>, press_accel: Point2, me: &Me) {
-        println!("TICK");
+        // println!("TICK");
         self.cycler += 1;
         if self.cycler == TRAJ_SCALING {
             self.cycler = 0;
@@ -298,24 +306,6 @@ impl event::EventHandler for MainState {
 
         self.trajjer.tick(&self.sig_config, &self.planets, self.press_accel, &self.me);
         self.trajjer.project_slice(&self.sig_config, self.window_dims, self.me.data.pos);
-
-        {
-            let mut prev_ = self.me.data.pos;
-            let mut vel_ = self.me.velocity;
-            self.trajectory[0] = self.window_dims * 0.5;
-            let tu = self.sig_config.traj_len();
-            for p in self.trajectory.iter_mut().skip(1).take(tu) {
-                for _ in 0..TRAJ_SCALING {
-                    // 1. reuse keypress acceleration
-                    // 2. update velocity (keypress + gravity)
-                    vel_ += self.press_accel.coords + Self::grav_accel(self.planets.iter(), prev_);
-
-                    // 3. update position
-                    prev_ += vel_.coords;
-                }
-                *p = self.sig_config.project(prev_, self.me.data.pos, self.window_dims).0;
-            } 
-        }
         Ok(())
     }
 
@@ -396,8 +386,8 @@ impl event::EventHandler for MainState {
         }
         match keycode {
             Keycode::Escape => ctx.quit().unwrap(),
-            Keycode::Space => self.me.velocity = Point2::new(0., 0.),
-            Keycode::Backspace => self.me.data.pos = Point2::new(0., 0.),
+            Keycode::Space => { self.me.velocity = Point2::new(0., 0.); self.recompute_press_accel()},
+            Keycode::Backspace => { self.me.data.pos = Point2::new(0., 0.); self.recompute_press_accel() },
             Keycode::A => {self.x_pressed.bump_left(); self.recompute_press_accel()},
             Keycode::D => {self.x_pressed.bump_right(); self.recompute_press_accel()},
             Keycode::W => {self.y_pressed.bump_left(); self.recompute_press_accel()},
