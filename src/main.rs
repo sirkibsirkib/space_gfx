@@ -42,7 +42,6 @@ struct Me {
     velocity: Point2,
 }
 
-
 const ACCEL: f32 = 0.0004;
 const TRAJ_PTS_CAP: usize = 8_000;
 const TRAJ_SCALING: usize = 20;
@@ -59,7 +58,6 @@ struct MainState {
     press_accel: Point2,
     scrolling_index: usize,
     scrolling_text: Vec<Option<ggez::graphics::Text>>,
-    // trajectory: [Point2; TRAJ_PTS_CAP],
     trajjer: Trajjer,
 }
 
@@ -207,6 +205,28 @@ impl Joystick for Option<bool> {
     }
 }
 
+/*
+buf data persists long term. contains UNPROJECTED trajectory in slice. this
+useful region is called "Valuable".
+head..buf.len(). first 0..head are junk data.
+
+every 1/TRAJ_SCALING ticks, the head advances 1 step, shrinking the valuable slice.
+when valuable slice becomes too small, it is shifted left, and its tail is extended
+to buf.len(). head is usually NOT shifted to zero, because this would make
+the tail super long.
+
+every time the pressed_velocity is changed, you should call buf_clear such
+that the buffer contents are entirely recomputed.
+--------------------
+buf_projected is a reused allocation but its overwritten every tick.
+its indices correspond with the other buf, and its just the visual projection
+applied to those, since the projection changes, even when the trajectory coords
+do not.
+
+after every tick, you should call project_slice() to update the projections.
+this call will compute sequentially or in parallel (with rayon) depending
+on the length of the slice
+*/
 struct Trajjer {
     buf: Vec<Point2>,
     head: usize,
@@ -266,7 +286,7 @@ impl Trajjer {
             let mut prev_;
             let mut vel_;
 
-            let left = self.head.checked_sub(min_len*2).unwrap_or(0);
+            let left = self.head.checked_sub(min_len*2 + 100).unwrap_or(0);
             let compute_from: usize = if valuable_range.len() > 0 {
                 self.buf.copy_within(valuable_range.clone(), left);
                 prev_ = *self.buf.as_slice().last().unwrap();
