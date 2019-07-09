@@ -250,7 +250,7 @@ impl Trajjer {
         let range = self.head..(self.head + l);
         let src = &self.buf[range.clone()];
         let dest = &mut self.buf_projected[range];
-        let a = std::time::Instant::now();
+        // let a = std::time::Instant::now();
         if sig_config.traj_len() > 900 {
             use rayon::prelude::*;
             src.par_iter().zip(dest.par_iter_mut()).for_each(|(s,d)| {
@@ -261,7 +261,7 @@ impl Trajjer {
                 *d = sig_config.project(*s, me_pos, window_dims).0;
             });
         }
-        println!("{:?}", a.elapsed());
+        // println!("{:?}", a.elapsed());
     }
     fn get_projected_slice(&self, sig_config: &SigConfig) -> &[Point2] {
         let l = sig_config.traj_len();
@@ -271,7 +271,6 @@ impl Trajjer {
     fn clear_traj(&mut self) {
          // trigger recompute
         self.head = TRAJ_PTS_CAP;
-        self.cycler = TRAJ_SCALING-1;
     }
     fn tick(&mut self, sig_config: &SigConfig, planets: &Vec<Instancedata>, press_accel: Point2, me: &Me) {
         // println!("TICK");
