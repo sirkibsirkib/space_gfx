@@ -1,16 +1,16 @@
 extern crate ggez;
-use ggez::graphics::Vector2;
-use std::path;
 use core::f32::consts::E;
 use ggez::event::Keycode;
 use ggez::event::Mod;
 use ggez::graphics::DrawParam;
+use ggez::graphics::Vector2;
 use ggez::graphics::{Color, Point2};
 use ggez::graphics::{BLACK, WHITE};
 use ggez::*;
 use itertools::izip;
 use rand::distributions::Standard;
 use rand::{Rng, SeedableRng};
+use std::path;
 
 const PINK: Color = Color {
     r: 1.0,
@@ -46,7 +46,6 @@ const ACCEL: f32 = 0.0004;
 const TRAJ_PTS_CAP: usize = 8_000;
 const TRAJ_SCALING: usize = 20;
 
-
 struct MainState {
     me: Me,
     planets: Vec<Instancedata>,
@@ -76,13 +75,13 @@ struct SigConfig {
 impl Default for SigConfig {
     fn default() -> Self {
         Self {
-            x: [0.02, -1.0, 1., 0.3, 1., 200.],
+            x: [0.02, -0.04, 0.6, 0.22, 1., 100.],
         }
     }
 }
 impl SigConfig {
     fn traj_len(&self) -> usize {
-        (self.x[5] as usize).min(TRAJ_PTS_CAP-100).max(8)
+        (self.x[5] as usize).min(TRAJ_PTS_CAP - 100).max(8)
     }
     fn sig(&self, dist: f32) -> f32 {
         let q = 2. / (1.0 + E.powf(-self.x[1])) - 1.;
@@ -104,6 +103,12 @@ fn length(p: Point2) -> f32 {
     (p[0].powf(2.0) + p[1].powf(2.0)).sqrt()
 }
 
+fn rand_pt<R: Rng>(rng: &mut R) -> Point2 {
+    let mut clos =
+        || rng.sample::<f32, _>(Standard).powf(3.0) * 900.0 * if rng.gen() { -1. } else { 1. };
+    Point2::new(clos(), clos())
+}
+
 impl MainState {
     fn recompute_press_accel(&mut self) {
         self.trajjer.clear_traj();
@@ -113,13 +118,13 @@ impl MainState {
         }
     }
     /// given a point in space, returns a vector representing its acceleration
-    fn grav_accel<'a>(planets: impl Iterator<Item=&'a Instancedata>, pt: Point2) -> Vector2 {
+    fn grav_accel<'a>(planets: impl Iterator<Item = &'a Instancedata>, pt: Point2) -> Vector2 {
         let mut v = Vector2::new(0., 0.);
         for p in planets {
             let impulse = p.pos - pt.coords;
             let len = length(impulse) + 3.0;
-            let new_len = 1.0 / (len*len);
-            v += impulse.coords / len * new_len * (p.scale*2.);
+            let new_len = 1.0 / (len * len);
+            v += impulse.coords / len * new_len * (p.scale * 2.);
         }
         v * 0.3
     }
@@ -129,20 +134,20 @@ impl MainState {
         use rand::rngs::StdRng;
         let mut rng = StdRng::from_seed([0; 32]);
         let rng = &mut rng;
-        let clos =
-            |rng: &mut StdRng| rng.sample::<f32, _>(Standard).powf(3.0) * 900.0 * if rng.gen() { -1. } else { 1. };
-
         for _i in 0..SQN {
             for _j in 0..SQN {
                 let colliding =
-                    |pt1: Point2| planets.iter().any(|pt2| length(pt1 - pt2.pos.coords) < 60.);
+                    |pt1: Point2| planets.iter().any(|pt2| length(pt1 - pt2.pos.coords) < 40.);
                 let pos = loop {
-                    let pos = Point2::new(clos(rng), clos(rng));
+                    let pos = rand_pt(rng);
                     if !colliding(pos) {
                         break pos;
                     }
                 };
-                let dp = Instancedata { pos, scale: rng.gen::<f32>() + 0.1 };
+                let dp = Instancedata {
+                    pos,
+                    scale: rng.gen::<f32>() + 0.1,
+                };
                 planets.push(dp);
             }
         }
@@ -168,7 +173,7 @@ impl MainState {
             x_pressed: None,
             y_pressed: None,
             press_accel: Point2::new(0., 0.),
-            scrolling_index: 0,
+            scrolling_index: 6,
             scrolling_text: (0..NUM_VARS).map(|_| None).collect(),
         };
         Ok(s)
@@ -241,11 +246,11 @@ impl Trajjer {
             buf: vec![Point2::new(0., 0.); TRAJ_PTS_CAP],
             buf_projected: vec![Point2::new(0., 0.); TRAJ_PTS_CAP],
             last_vel: Point2::new(0., 0.),
-            cycler: TRAJ_SCALING-1,
+            cycler: TRAJ_SCALING - 1,
             head: TRAJ_PTS_CAP,
         }
     }
-    fn project_slice(&mut self, sig_config: &SigConfig, window_dims: Point2, me_pos: Point2){
+    fn project_slice(&mut self, sig_config: &SigConfig, window_dims: Point2, me_pos: Point2) {
         let l = sig_config.traj_len();
         let range = self.head..(self.head + l);
         let src = &self.buf[range.clone()];
@@ -253,11 +258,11 @@ impl Trajjer {
         // let a = std::time::Instant::now();
         if sig_config.traj_len() > 900 {
             use rayon::prelude::*;
-            src.par_iter().zip(dest.par_iter_mut()).for_each(|(s,d)| {
+            src.par_iter().zip(dest.par_iter_mut()).for_each(|(s, d)| {
                 *d = sig_config.project(*s, me_pos, window_dims).0;
             });
         } else {
-            src.iter().zip(dest.iter_mut()).for_each(|(s,d)| {
+            src.iter().zip(dest.iter_mut()).for_each(|(s, d)| {
                 *d = sig_config.project(*s, me_pos, window_dims).0;
             });
         }
@@ -269,10 +274,16 @@ impl Trajjer {
         &self.buf_projected[range]
     }
     fn clear_traj(&mut self) {
-         // trigger recompute
+        // trigger recompute
         self.head = TRAJ_PTS_CAP;
     }
-    fn tick(&mut self, sig_config: &SigConfig, planets: &Vec<Instancedata>, press_accel: Point2, me: &Me) {
+    fn tick(
+        &mut self,
+        sig_config: &SigConfig,
+        planets: &Vec<Instancedata>,
+        press_accel: Point2,
+        me: &Me,
+    ) {
         // println!("TICK");
         self.cycler += 1;
         if self.cycler == TRAJ_SCALING {
@@ -285,7 +296,7 @@ impl Trajjer {
             let mut prev_;
             let mut vel_;
 
-            let left = self.head.checked_sub(min_len*2 + 100).unwrap_or(0);
+            let left = self.head.checked_sub(min_len * 2 + 100).unwrap_or(0);
             let compute_from: usize = if valuable_range.len() > 0 {
                 self.buf.copy_within(valuable_range.clone(), left);
                 prev_ = *self.buf.as_slice().last().unwrap();
@@ -295,7 +306,7 @@ impl Trajjer {
                 self.buf[left] = me.data.pos;
                 prev_ = self.buf[left];
                 vel_ = me.velocity;
-                left+1
+                left + 1
             };
             for p in &mut self.buf[compute_from..] {
                 for _ in 0..TRAJ_SCALING {
@@ -318,13 +329,16 @@ impl event::EventHandler for MainState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
         // 1. compute keypress acceleration
         // 2. update velocity (keypress + gravity)
-        self.me.velocity += self.press_accel.coords + Self::grav_accel(self.planets.iter(), self.me.data.pos);
+        self.me.velocity +=
+            self.press_accel.coords + Self::grav_accel(self.planets.iter(), self.me.data.pos);
 
         // 3. update position
         self.me.data.pos += self.me.velocity.coords;
 
-        self.trajjer.tick(&self.sig_config, &self.planets, self.press_accel, &self.me);
-        self.trajjer.project_slice(&self.sig_config, self.window_dims, self.me.data.pos);
+        self.trajjer
+            .tick(&self.sig_config, &self.planets, self.press_accel, &self.me);
+        self.trajjer
+            .project_slice(&self.sig_config, self.window_dims, self.me.data.pos);
         Ok(())
     }
 
@@ -335,7 +349,9 @@ impl event::EventHandler for MainState {
 
         ggez::graphics::set_color(ctx, WHITE)?;
         for i in self.planets.iter() {
-            let (dest, sigged) = self.sig_config.project(i.pos, self.me.data.pos, self.window_dims);
+            let (dest, sigged) = self
+                .sig_config
+                .project(i.pos, self.me.data.pos, self.window_dims);
             let s = (i.scale * x[3] * (1.0 - sigged).powf(x[2])).max(0.005);
             let dp = DrawParam {
                 dest,
@@ -374,13 +390,13 @@ impl event::EventHandler for MainState {
         // let ts = &self.trajectory[..];
         let ts = self.trajjer.get_projected_slice(&self.sig_config);
         ggez::graphics::set_color(ctx, PINK)?;
-        graphics::line(ctx, &ts[0..=tu/4], 1.0)?;
+        graphics::line(ctx, &ts[0..=tu / 4], 1.0)?;
         ggez::graphics::set_color(ctx, PINK2)?;
-        graphics::line(ctx, &ts[tu*1/4..=tu*2/4], 1.0)?;
+        graphics::line(ctx, &ts[tu * 1 / 4..=tu * 2 / 4], 1.0)?;
         ggez::graphics::set_color(ctx, PINK3)?;
-        graphics::line(ctx, &ts[tu*2/4..=tu*3/4], 1.0)?;
+        graphics::line(ctx, &ts[tu * 2 / 4..=tu * 3 / 4], 1.0)?;
         ggez::graphics::set_color(ctx, PINK4)?;
-        graphics::line(ctx, &ts[tu*3/4..tu], 1.0)?;
+        graphics::line(ctx, &ts[tu * 3 / 4..tu], 1.0)?;
 
         graphics::present(ctx);
         Ok(())
@@ -391,10 +407,22 @@ impl event::EventHandler for MainState {
             return;
         }
         match keycode {
-            Keycode::D => {self.x_pressed.bump_left(); self.recompute_press_accel()},
-            Keycode::A => {self.x_pressed.bump_right(); self.recompute_press_accel()},
-            Keycode::S => {self.y_pressed.bump_left(); self.recompute_press_accel()},
-            Keycode::W => {self.y_pressed.bump_right(); self.recompute_press_accel()},
+            Keycode::D => {
+                self.x_pressed.bump_left();
+                self.recompute_press_accel()
+            }
+            Keycode::A => {
+                self.x_pressed.bump_right();
+                self.recompute_press_accel()
+            }
+            Keycode::S => {
+                self.y_pressed.bump_left();
+                self.recompute_press_accel()
+            }
+            Keycode::W => {
+                self.y_pressed.bump_right();
+                self.recompute_press_accel()
+            }
             _ => (),
         }
     }
@@ -405,24 +433,45 @@ impl event::EventHandler for MainState {
         }
         match keycode {
             Keycode::Escape => ctx.quit().unwrap(),
-            Keycode::Space => { self.me.velocity = Point2::new(0., 0.); self.recompute_press_accel()},
-            Keycode::Backspace => { self.me.data.pos = Point2::new(0., 0.); self.recompute_press_accel() },
-            Keycode::A => {self.x_pressed.bump_left(); self.recompute_press_accel()},
-            Keycode::D => {self.x_pressed.bump_right(); self.recompute_press_accel()},
-            Keycode::W => {self.y_pressed.bump_left(); self.recompute_press_accel()},
-            Keycode::S => {self.y_pressed.bump_right(); self.recompute_press_accel()},
+            Keycode::Space => {
+                self.me.velocity = Point2::new(0., 0.);
+                self.recompute_press_accel()
+            }
+            Keycode::Backspace => {
+                self.me.data.pos = rand_pt(&mut rand::thread_rng());
+                self.recompute_press_accel()
+            }
+            Keycode::A => {
+                self.x_pressed.bump_left();
+                self.recompute_press_accel()
+            }
+            Keycode::D => {
+                self.x_pressed.bump_right();
+                self.recompute_press_accel()
+            }
+            Keycode::W => {
+                self.y_pressed.bump_left();
+                self.recompute_press_accel()
+            }
+            Keycode::S => {
+                self.y_pressed.bump_right();
+                self.recompute_press_accel()
+            }
             Keycode::F4 => {
                 let q = ggez::graphics::is_fullscreen(ctx);
                 ggez::graphics::set_fullscreen(ctx, !q).unwrap()
-            },
+            }
             Keycode::PrintScreen => match graphics::screenshot(ctx) {
-                Ok(img) => for i in 0.. {
-                    let f = format!("space_screencap_{}.png", i);
-                    let path = path::Path::new(&f);
-                    if !path.exists() {
-                        img.encode(ctx, graphics::ImageFormat::Png, path).expect("K")
+                Ok(img) => {
+                    for i in 0.. {
+                        let f = format!("space_screencap_{}.png", i);
+                        let path = path::Path::new(&f);
+                        if !path.exists() {
+                            img.encode(ctx, graphics::ImageFormat::Png, path)
+                                .expect("K")
+                        }
                     }
-                },
+                }
                 Err(_) => println!("print screen failed!"),
             },
             Keycode::Num1 => self.scrolling_index = 0,
@@ -431,12 +480,26 @@ impl event::EventHandler for MainState {
             Keycode::Num4 => self.scrolling_index = 3,
             Keycode::Num5 => self.scrolling_index = 4,
             Keycode::Num6 => self.scrolling_index = 5,
+            Keycode::Num7 => self.scrolling_index = 6,
             _ => (),
         }
-        assert!(self.scrolling_index < NUM_VARS);
+        // assert!(self.scrolling_index < NUM_VARS);
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: i32, y: i32) {
+        if self.scrolling_index == 6 {
+            // special case
+            if y < 0 {
+                self.sig_config.x[0] *= 0.9;
+                self.sig_config.x[3] *= 0.9;
+            } else {
+                self.sig_config.x[0] /= 0.9;
+                self.sig_config.x[3] /= 0.9;
+            }
+            self.scrolling_text[0] = None;
+            self.scrolling_text[3] = None;
+            return;
+        }
         let var: &mut f32 = &mut self.sig_config.x[self.scrolling_index];
         if y < 0 {
             *var *= 0.9
@@ -461,7 +524,9 @@ pub fn main() {
          For example, try: (0.09, -3, 1.8, 3.9, 1)\n\
          and (0.01, -1, 1.8, 0.3, 1.11)\n"
     );
-    let c = conf::Conf::new();
+    let mut c = conf::Conf::new();
+    c.window_mode.width = 1000;
+    c.window_mode.height = 800;
     let mut ctx = &mut Context::load_from_conf("super_simple", "ggez", c).unwrap();
     let state = &mut MainState::new(ctx).unwrap();
     ggez::graphics::set_background_color(&mut ctx, BLACK);
