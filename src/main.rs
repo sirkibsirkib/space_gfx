@@ -75,7 +75,7 @@ struct SigConfig {
 impl Default for SigConfig {
     fn default() -> Self {
         Self {
-            x: [0.02, -0.04, 0.6, 0.22, 1., 100.],
+            x: [0.02, -0.04, 0.6, 0.22, 1.5, 100.],
         }
     }
 }
@@ -122,11 +122,11 @@ impl MainState {
         let mut v = Vector2::new(0., 0.);
         for p in planets {
             let impulse = p.pos - pt.coords;
-            let len = length(impulse) + 3.0;
+            let len = length(impulse) + 2.0;
             let new_len = 1.0 / (len * len);
             v += impulse.coords / len * new_len * (p.scale * 2.);
         }
-        v * 0.3
+        v * 0.5
     }
     fn new(ctx: &mut Context) -> GameResult<MainState> {
         let mut planets: Vec<Instancedata> = vec![];
@@ -146,7 +146,7 @@ impl MainState {
                 };
                 let dp = Instancedata {
                     pos,
-                    scale: rng.gen::<f32>() + 0.1,
+                    scale: rng.gen::<f32>() + 0.05,
                 };
                 planets.push(dp);
             }
