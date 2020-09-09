@@ -1,16 +1,24 @@
 extern crate ggez;
 use core::f32::consts::E;
-use ggez::event::Keycode;
-use ggez::event::Mod;
+use ggez::graphics::DrawMode;
+use ggez::graphics::Font;
+use ggez::graphics::MeshBuilder;
+use ggez::graphics::TextFragment;
+use ggez::input::keyboard::KeyCode;
+use ggez::input::keyboard::KeyMods;
+
+// use ggez::event::Mod;
+use ggez::graphics::Color;
 use ggez::graphics::DrawParam;
-use ggez::graphics::Vector2;
-use ggez::graphics::{Color, Point2};
 use ggez::graphics::{BLACK, WHITE};
 use ggez::*;
 use itertools::izip;
 use rand::distributions::Standard;
 use rand::{Rng, SeedableRng};
 use std::path;
+
+type Point2 = ggez::nalgebra::Point2<f32>;
+type Vector2 = ggez::nalgebra::Vector2<f32>;
 
 const PINK: Color = Color {
     r: 1.0,
@@ -58,6 +66,7 @@ struct MainState {
     scrolling_index: usize,
     scrolling_text: Vec<Option<ggez::graphics::Text>>,
     trajjer: Trajjer,
+    is_fullscreen: bool,
 }
 
 const NUM_VARS: usize = 6;
@@ -154,8 +163,11 @@ impl MainState {
 
         let mut planet_sprite = graphics::Image::new(ctx, "/ball.png")?;
         planet_sprite.set_filter(graphics::FilterMode::Nearest);
-        let d = ggez::graphics::get_size(ctx);
-        let window_dims = Point2::new(d.0 as f32, d.1 as f32);
+        let d = {
+            let rect = ggez::graphics::screen_coordinates(ctx);
+            [rect.w, rect.h]
+        };
+        let window_dims = Point2::new(d[0] as f32, d[1] as f32);
         let me = Me {
             data: Instancedata {
                 pos: Point2::new(0., 0.),
@@ -164,6 +176,7 @@ impl MainState {
             velocity: Point2::new(0., 0.),
         };
         let s = MainState {
+            is_fullscreen: false,
             trajjer: Trajjer::new(),
             me,
             planets,
@@ -325,7 +338,7 @@ impl Trajjer {
     }
 }
 
-impl event::EventHandler for MainState {
+impl ggez::event::EventHandler for MainState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
         // 1. compute keypress acceleration
         // 2. update velocity (keypress + gravity)
@@ -343,23 +356,23 @@ impl event::EventHandler for MainState {
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
-        graphics::clear(ctx);
+        graphics::clear(ctx, BLACK);
 
         let x: &[f32; NUM_VARS] = &self.sig_config.x;
 
-        ggez::graphics::set_color(ctx, WHITE)?;
+        // ggez::graphics::set_color(ctx, WHITE)?;
         for i in self.planets.iter() {
             let (dest, sigged) = self
                 .sig_config
                 .project(i.pos, self.me.data.pos, self.window_dims);
             let s = (i.scale * x[3] * (1.0 - sigged).powf(x[2])).max(0.005);
             let dp = DrawParam {
-                dest,
-                scale: Point2::new(s, s),
-                offset: Point2::new(0.5, 0.5),
+                dest: dest.into(),
+                scale: [s; 2].into(),
+                offset: [0.5; 2].into(),
                 ..Default::default()
             };
-            graphics::draw_ex(ctx, &self.planet_sprite, dp)?;
+            graphics::draw(ctx, &self.planet_sprite, dp)?;
         }
 
         for (i, value, font) in izip!(
@@ -368,9 +381,8 @@ impl event::EventHandler for MainState {
             self.scrolling_text.iter_mut()
         ) {
             let f = font.get_or_insert_with(|| {
-                let font = ggez::graphics::Font::default_font().unwrap();
                 let s = format!("{}", value);
-                ggez::graphics::Text::new(ctx, &s, &font).expect("K")
+                ggez::graphics::Text::new(TextFragment::from(s))
             });
             let col = if i == self.scrolling_index {
                 PINK
@@ -378,48 +390,53 @@ impl event::EventHandler for MainState {
                 WHITE
             };
             let dp = DrawParam {
-                dest: Point2::new(20., (i * 30) as f32 + 20.),
-                scale: Point2::new(1., 1.),
+                dest: [20., (i * 30) as f32 + 20.].into(),
+                scale: [1.; 2].into(),
+                color: col,
                 ..Default::default()
             };
-            ggez::graphics::set_color(ctx, col)?;
-            ggez::graphics::draw_ex(ctx, f, dp)?;
+            ggez::graphics::draw(ctx, f, dp)?;
         }
 
         let tu = self.sig_config.traj_len();
         // let ts = &self.trajectory[..];
+        let drawmode = DrawMode::stroke(1.);
         let ts = self.trajjer.get_projected_slice(&self.sig_config);
-        ggez::graphics::set_color(ctx, PINK)?;
-        graphics::line(ctx, &ts[0..=tu / 4], 1.0)?;
-        ggez::graphics::set_color(ctx, PINK2)?;
-        graphics::line(ctx, &ts[tu * 1 / 4..=tu * 2 / 4], 1.0)?;
-        ggez::graphics::set_color(ctx, PINK3)?;
-        graphics::line(ctx, &ts[tu * 2 / 4..=tu * 3 / 4], 1.0)?;
-        ggez::graphics::set_color(ctx, PINK4)?;
-        graphics::line(ctx, &ts[tu * 3 / 4..tu], 1.0)?;
+        let m = MeshBuilder::new()
+            .polyline(drawmode, &ts[0..=tu / 4], PINK)?
+            .build(ctx)?;
+        ggez::graphics::draw(ctx, &m, DrawParam::default())?;
+        let m = MeshBuilder::new()
+            .polyline(drawmode, &ts[tu * 1 / 4..=tu * 2 / 4], PINK2)?
+            .build(ctx)?;
+        ggez::graphics::draw(ctx, &m, DrawParam::default())?;
+        let m = MeshBuilder::new()
+            .polyline(drawmode, &ts[tu * 2 / 4..=tu * 3 / 4], PINK3)?
+            .build(ctx)?;
+        ggez::graphics::draw(ctx, &m, DrawParam::default())?;
+        let m = MeshBuilder::new()
+            .polyline(drawmode, &ts[tu * 3 / 4..tu], PINK4)?
+            .build(ctx)?;
+        ggez::graphics::draw(ctx, &m, DrawParam::default())?;
 
-        graphics::present(ctx);
-        Ok(())
+        graphics::present(ctx)
     }
 
-    fn key_up_event(&mut self, _ctx: &mut Context, keycode: Keycode, _keymod: Mod, repeat: bool) {
-        if repeat {
-            return;
-        }
+    fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
         match keycode {
-            Keycode::D => {
+            KeyCode::D => {
                 self.x_pressed.bump_left();
                 self.recompute_press_accel()
             }
-            Keycode::A => {
+            KeyCode::A => {
                 self.x_pressed.bump_right();
                 self.recompute_press_accel()
             }
-            Keycode::S => {
+            KeyCode::S => {
                 self.y_pressed.bump_left();
                 self.recompute_press_accel()
             }
-            Keycode::W => {
+            KeyCode::W => {
                 self.y_pressed.bump_right();
                 self.recompute_press_accel()
             }
@@ -427,41 +444,51 @@ impl event::EventHandler for MainState {
         }
     }
 
-    fn key_down_event(&mut self, ctx: &mut Context, keycode: Keycode, _keymod: Mod, repeat: bool) {
+    fn key_down_event(
+        &mut self,
+        ctx: &mut Context,
+        keycode: KeyCode,
+        _keymod: KeyMods,
+        repeat: bool,
+    ) {
         if repeat {
             return;
         }
         match keycode {
-            Keycode::Escape => ctx.quit().unwrap(),
-            Keycode::Space => {
+            KeyCode::Escape => ggez::event::quit(ctx),
+            KeyCode::Space => {
                 self.me.velocity = Point2::new(0., 0.);
                 self.recompute_press_accel()
             }
-            Keycode::Backspace => {
+            KeyCode::Back => {
                 self.me.data.pos = rand_pt(&mut rand::thread_rng());
                 self.recompute_press_accel()
             }
-            Keycode::A => {
+            KeyCode::A => {
                 self.x_pressed.bump_left();
                 self.recompute_press_accel()
             }
-            Keycode::D => {
+            KeyCode::D => {
                 self.x_pressed.bump_right();
                 self.recompute_press_accel()
             }
-            Keycode::W => {
+            KeyCode::W => {
                 self.y_pressed.bump_left();
                 self.recompute_press_accel()
             }
-            Keycode::S => {
+            KeyCode::S => {
                 self.y_pressed.bump_right();
                 self.recompute_press_accel()
             }
-            Keycode::F4 => {
-                let q = ggez::graphics::is_fullscreen(ctx);
-                ggez::graphics::set_fullscreen(ctx, !q).unwrap()
+            KeyCode::F4 => {
+                let set_to = match self.is_fullscreen {
+                    false => ggez::conf::FullscreenType::Windowed,
+                    true => ggez::conf::FullscreenType::Desktop,
+                };
+                self.is_fullscreen = !self.is_fullscreen;
+                ggez::graphics::set_fullscreen(ctx, set_to).unwrap()
             }
-            Keycode::PrintScreen => match graphics::screenshot(ctx) {
+            KeyCode::Snapshot => match graphics::screenshot(ctx) {
                 Ok(img) => {
                     for i in 0.. {
                         let f = format!("space_screencap_{}.png", i);
@@ -474,22 +501,22 @@ impl event::EventHandler for MainState {
                 }
                 Err(_) => println!("print screen failed!"),
             },
-            Keycode::Num1 => self.scrolling_index = 0,
-            Keycode::Num2 => self.scrolling_index = 1,
-            Keycode::Num3 => self.scrolling_index = 2,
-            Keycode::Num4 => self.scrolling_index = 3,
-            Keycode::Num5 => self.scrolling_index = 4,
-            Keycode::Num6 => self.scrolling_index = 5,
-            Keycode::Num7 => self.scrolling_index = 6,
+            KeyCode::Key0 => self.scrolling_index = 0,
+            KeyCode::Key1 => self.scrolling_index = 1,
+            KeyCode::Key2 => self.scrolling_index = 2,
+            KeyCode::Key3 => self.scrolling_index = 3,
+            KeyCode::Key4 => self.scrolling_index = 4,
+            KeyCode::Key5 => self.scrolling_index = 5,
+            KeyCode::Key6 => self.scrolling_index = 6,
             _ => (),
         }
         // assert!(self.scrolling_index < NUM_VARS);
     }
 
-    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: i32, y: i32) {
+    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
         if self.scrolling_index == 6 {
             // special case
-            if y < 0 {
+            if y < 0. {
                 self.sig_config.x[0] *= 0.9;
                 self.sig_config.x[3] *= 0.9;
             } else {
@@ -501,9 +528,9 @@ impl event::EventHandler for MainState {
             return;
         }
         let var: &mut f32 = &mut self.sig_config.x[self.scrolling_index];
-        if y < 0 {
+        if y < 0. {
             *var *= 0.9
-        } else if y > 0 {
+        } else if y > 0. {
             *var /= 0.9
         }
         self.scrolling_text[self.scrolling_index] = None;
@@ -524,11 +551,19 @@ pub fn main() {
          For example, try: (0.09, -3, 1.8, 3.9, 1)\n\
          and (0.01, -1, 1.8, 0.3, 1.11)\n"
     );
-    let mut c = conf::Conf::new();
-    c.window_mode.width = 1000;
-    c.window_mode.height = 800;
-    let mut ctx = &mut Context::load_from_conf("super_simple", "ggez", c).unwrap();
-    let state = &mut MainState::new(ctx).unwrap();
-    ggez::graphics::set_background_color(&mut ctx, BLACK);
-    event::run(ctx, state).unwrap();
+    let (mut ctx, mut event_loop) = ContextBuilder::new("my_game", "Cool Game Author")
+        .build()
+        .expect("aieee, could not create ggez context!");
+
+    // Create an instance of your event handler.
+    // Usually, you should provide it with the Context object to
+    // use when setting your game up.
+    let mut my_game = MainState::new(&mut ctx).unwrap();
+
+    // Run!
+    println!("HERE WE GO");
+    match event::run(&mut ctx, &mut event_loop, &mut my_game) {
+        Ok(_) => println!("Exited cleanly."),
+        Err(e) => println!("Error occured: {}", e),
+    }
 }
